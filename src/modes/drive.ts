@@ -36,8 +36,11 @@ export async function handleDrive(api: WorkspaceAPI, params: ToolParams): Promis
       const res = await drive.files.list({
         q: params.query,
         pageSize: params.max_results || 10,
-        fields: "files(id,name,mimeType,size,createdTime,modifiedTime,parents,webViewLink,owners,shared)",
+        fields: "files(id,name,mimeType,size,createdTime,modifiedTime,parents,webViewLink,owners,shared,driveId)",
         orderBy: "modifiedTime desc",
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+        corpora: "allDrives",
       });
       const files = (res.data.files || []).map(formatFile);
       return JSON.stringify({ files, count: files.length });
@@ -48,8 +51,11 @@ export async function handleDrive(api: WorkspaceAPI, params: ToolParams): Promis
       const res = await drive.files.list({
         q: `'${parentId}' in parents and trashed=false`,
         pageSize: params.max_results || 10,
-        fields: "files(id,name,mimeType,size,createdTime,modifiedTime,parents,webViewLink,owners,shared)",
+        fields: "files(id,name,mimeType,size,createdTime,modifiedTime,parents,webViewLink,owners,shared,driveId)",
         orderBy: "folder,name",
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+        corpora: "allDrives",
       });
       const files = (res.data.files || []).map(formatFile);
       return JSON.stringify({ files, count: files.length, parentId });
@@ -59,7 +65,8 @@ export async function handleDrive(api: WorkspaceAPI, params: ToolParams): Promis
       if (!params.file_id) return JSON.stringify({ error: "file_id is required for get" });
       const res = await drive.files.get({
         fileId: params.file_id,
-        fields: "id,name,mimeType,size,createdTime,modifiedTime,parents,webViewLink,owners,shared,description",
+        fields: "id,name,mimeType,size,createdTime,modifiedTime,parents,webViewLink,owners,shared,description,driveId",
+        supportsAllDrives: true,
       });
       return JSON.stringify(formatFile(res.data));
     }
@@ -71,6 +78,7 @@ export async function handleDrive(api: WorkspaceAPI, params: ToolParams): Promis
       const meta = await drive.files.get({
         fileId: params.file_id,
         fields: "id,name,mimeType,size",
+        supportsAllDrives: true,
       });
       const mimeType = meta.data.mimeType || "";
 
@@ -82,12 +90,14 @@ export async function handleDrive(api: WorkspaceAPI, params: ToolParams): Promis
         const res = await drive.files.export({
           fileId: params.file_id,
           mimeType: exportType,
-        }, { responseType: "text" });
+          supportsAllDrives: true,
+        } as any, { responseType: "text" });
         content = String(res.data);
       } else {
         const res = await drive.files.get({
           fileId: params.file_id,
           alt: "media",
+          supportsAllDrives: true,
         }, { responseType: "text" });
         content = String(res.data);
       }
@@ -118,6 +128,7 @@ export async function handleDrive(api: WorkspaceAPI, params: ToolParams): Promis
           body: Readable.from(contentBuffer),
         },
         fields: "id,name,mimeType,webViewLink",
+        supportsAllDrives: true,
       });
       return JSON.stringify({ uploaded: true, ...formatFile(res.data), from: params.account });
     }
@@ -131,6 +142,7 @@ export async function handleDrive(api: WorkspaceAPI, params: ToolParams): Promis
           parents: params.parent_id ? [params.parent_id] : undefined,
         },
         fields: "id,name,mimeType,webViewLink",
+        supportsAllDrives: true,
       });
       return JSON.stringify({ created: true, ...formatFile(res.data), from: params.account });
     }
@@ -140,13 +152,14 @@ export async function handleDrive(api: WorkspaceAPI, params: ToolParams): Promis
         return JSON.stringify({ error: "file_id and parent_id are required for move" });
       }
       // Get current parents
-      const file = await drive.files.get({ fileId: params.file_id, fields: "parents" });
+      const file = await drive.files.get({ fileId: params.file_id, fields: "parents", supportsAllDrives: true });
       const previousParents = (file.data.parents || []).join(",");
       const res = await drive.files.update({
         fileId: params.file_id,
         addParents: params.parent_id,
         removeParents: previousParents,
         fields: "id,name,parents",
+        supportsAllDrives: true,
       });
       return JSON.stringify({ moved: true, id: res.data.id, name: res.data.name, newParent: params.parent_id });
     }
@@ -162,6 +175,7 @@ export async function handleDrive(api: WorkspaceAPI, params: ToolParams): Promis
           role: params.share_role || "reader",
           emailAddress: params.share_email,
         },
+        supportsAllDrives: true,
       });
       return JSON.stringify({
         shared: true,
