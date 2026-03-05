@@ -165,22 +165,21 @@ export async function handleDrive(api: WorkspaceAPI, params: ToolParams): Promis
     }
 
     case "share": {
-      if (!params.file_id || !params.share_email) {
-        return JSON.stringify({ error: "file_id and share_email are required for share" });
+      if (!params.file_id) {
+        return JSON.stringify({ error: "file_id is required for share" });
       }
+      const isAnyone = !params.share_email || params.share_email === "anyone";
       await drive.permissions.create({
         fileId: params.file_id,
-        requestBody: {
-          type: "user",
-          role: params.share_role || "reader",
-          emailAddress: params.share_email,
-        },
+        requestBody: isAnyone
+          ? { type: "anyone", role: params.share_role || "reader" }
+          : { type: "user", role: params.share_role || "reader", emailAddress: params.share_email },
         supportsAllDrives: true,
       });
       return JSON.stringify({
         shared: true,
         fileId: params.file_id,
-        sharedWith: params.share_email,
+        sharedWith: isAnyone ? "anyone" : params.share_email,
         role: params.share_role || "reader",
         from: params.account,
       });
