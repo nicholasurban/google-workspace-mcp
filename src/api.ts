@@ -81,6 +81,33 @@ export class WorkspaceAPI {
     this.calendarClients.delete(email);
     this.driveClients.delete(email);
     this.peopleClients.delete(email);
+    // Persist to Coolify env var so token survives container restarts
+    this.syncTokensToCoolify().catch((err) =>
+      console.error("Failed to sync tokens to Coolify:", err.message)
+    );
+  }
+
+  private async syncTokensToCoolify(): Promise<void> {
+    const coolifyToken = process.env.COOLIFY_API_TOKEN;
+    const coolifyAppId = process.env.COOLIFY_APP_ID;
+    const coolifyBase = process.env.COOLIFY_API_URL || "http://46.224.152.172:8000";
+    if (!coolifyToken || !coolifyAppId) return;
+
+    const tokensJson = fs.readFileSync(this.tokensFile, "utf-8");
+    const b64 = Buffer.from(tokensJson).toString("base64");
+
+    const res = await fetch(`${coolifyBase}/api/v1/applications/${coolifyAppId}/envs`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${coolifyToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ key: "GOOGLE_TOKENS_BASE64", value: b64, is_preview: false }),
+    });
+    if (!res.ok) {
+      throw new Error(`Coolify PATCH ${res.status}: ${await res.text()}`);
+    }
+    console.error(`Synced GOOGLE_TOKENS_BASE64 to Coolify (${tokensJson.length} bytes)`);
   }
 
   getConfiguredAccounts(): string[] {
