@@ -15,11 +15,30 @@ interface StoredCode {
   expiresAt: number;
 }
 
+const TOKEN_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+function createSignedToken(secret: string): string {
+  const issuedAt = Date.now().toString();
+  const payload = Buffer.from(issuedAt).toString("base64url");
+  const sig = crypto.createHmac("sha256", secret).update(payload).digest("base64url");
+  return `${payload}.${sig}`;
+}
+
+function verifySignedToken(token: string, secret: string): boolean {
+  const dot = token.indexOf(".");
+  if (dot === -1) return false;
+  const payload = token.slice(0, dot);
+  const sig = token.slice(dot + 1);
+  const expected = crypto.createHmac("sha256", secret).update(payload).digest("base64url");
+  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return false;
+  const issuedAt = parseInt(Buffer.from(payload, "base64url").toString(), 10);
+  if (isNaN(issuedAt)) return false;
+  return Date.now() - issuedAt < TOKEN_MAX_AGE_MS;
+}
+
 export function setupOAuth(app: any, config: OAuthConfig) {
   const authCodes = new Map<string, StoredCode>();
-  const accessTokens = new Set<string>();
 
-  // Cleanup expired auth codes periodically
   setInterval(() => {
     const now = Date.now();
     for (const [code, stored] of authCodes) {
@@ -27,7 +46,6 @@ export function setupOAuth(app: any, config: OAuthConfig) {
     }
   }, 60_000);
 
-  // MCP Protected Resource Metadata
   app.get("/.well-known/oauth-protected-resource", (_req: any, res: any) => {
     res.json({
       resource: `${config.publicUrl}/mcp`,
@@ -36,7 +54,6 @@ export function setupOAuth(app: any, config: OAuthConfig) {
     });
   });
 
-  // OAuth Authorization Server Metadata
   app.get("/.well-known/oauth-authorization-server", (_req: any, res: any) => {
     res.json({
       issuer: config.publicUrl,
@@ -49,7 +66,6 @@ export function setupOAuth(app: any, config: OAuthConfig) {
     });
   });
 
-  // Authorization endpoint — auto-approves for configured client
   app.get("/authorize", (req: any, res: any) => {
     const { client_id, redirect_uri, response_type, state, code_challenge, code_challenge_method } =
       req.query as Record<string, string>;
@@ -78,7 +94,6 @@ export function setupOAuth(app: any, config: OAuthConfig) {
     res.redirect(302, url.toString());
   });
 
-  // Token endpoint
   app.post("/token", (req: any, res: any) => {
     const { grant_type, code, client_id, client_secret, redirect_uri, code_verifier } = req.body;
 
@@ -104,7 +119,6 @@ export function setupOAuth(app: any, config: OAuthConfig) {
       return;
     }
 
-    // PKCE verification
     if (stored.codeChallenge) {
       if (stored.codeChallengeMethod === "S256") {
         const hash = crypto.createHash("sha256").update(code_verifier || "").digest("base64url");
@@ -120,12 +134,12 @@ export function setupOAuth(app: any, config: OAuthConfig) {
 
     authCodes.delete(code);
 
-    const accessToken = crypto.randomBytes(32).toString("hex");
-    accessTokens.add(accessToken);
+    const accessToken = createSignedToken(config.clientSecret);
 
     res.json({
       access_token: accessToken,
       token_type: "Bearer",
+      expires_in: Math.floor(TOKEN_MAX_AGE_MS / 1000),
     });
   });
 
@@ -135,7 +149,7 @@ export function setupOAuth(app: any, config: OAuthConfig) {
       if (!auth) return false;
       const token = auth.replace(/^Bearer\s+/i, "");
       if (config.staticToken && token === config.staticToken) return true;
-      return accessTokens.has(token);
+      return verifySignedToken(token, config.clientSecret);
     },
   };
 }
